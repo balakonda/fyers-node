@@ -219,7 +219,7 @@ export const getMarket30Data = async (symbol) => {
 const amountKey = "amount";
 const baseAmount = 10000000;
 let isRunning = false;
-export const calculateByAmount = async () => {
+export const calculateByAmount = async (amount) => {
   if (isRunning) {
     console.log("calculateByAmount is already running");
     return;
@@ -240,34 +240,35 @@ export const calculateByAmount = async () => {
     const currentMinute = getCurrentTime.getMinutes();
 
     for (const hour of TRADING_HOURS) {
-      if (hour <= currentHour) {
+      if (hour <= currentHour && TRADING_HOURS.includes(currentHour)) {
         // Check if the currentRedisKey exists for that hour
         const checkRedisKey = `${amountKey}:${amount}:*:${currentDay}-${hour}-*`;
         console.log("checkRedisKey", checkRedisKey);
         // Scan it using pattern
         let cursor = 0;
         let keys = [];
-        if (hour !== currentHour) {
-          do {
-            const result = await client.scan(cursor, {
-              MATCH: checkRedisKey,
-              COUNT: 100,
-            });
-            cursor = result.cursor;
-            keys = keys.concat(result.keys);
-          } while (cursor !== 0);
+        // if (hour !== currentHour) {
+        //   do {
+        //     const result = await client.scan(cursor, {
+        //       MATCH: checkRedisKey,
+        //       COUNT: 100,
+        //     });
+        //     cursor = result.cursor;
+        //     keys = keys.concat(result.keys);
+        //   } while (cursor !== 0);
 
-          console.log("keys", keys.length);
+        //   console.log("keys", keys.length);
 
-          if (keys.length > 0) {
-            // Skip the operation for that hour
-            console.log("skipping the operation for that hour:", hour);
-            continue;
-          }
-          console.log("calculating for hour", hour);
-        }
+        //   if (keys.length > 0) {
+        //     // Skip the operation for that hour
+        //     console.log("skipping the operation for that hour:", hour);
+        //     continue;
+        //   }
+        //   console.log("calculating for hour", hour);
+        // }
         for (const minute of MINUTES) {
           if (hour === currentHour && minute >= currentMinute) {
+            // console.log("skipping the operation for that minute:", minute);
             continue;
           }
           try {
@@ -286,12 +287,25 @@ export const calculateByAmount = async () => {
                 currentRedisKey = `${sym}:${currentDay}-${hour}-${minute}-60`;
                 previousRedisKey = `${sym}:${currentDay}-${hour - 1}-59-60`;
               }
-
-              // console.log("currentRedisKey", hour, minute);
-              const currentData = await client.get(currentRedisKey);
-              const previousData = await client.get(previousRedisKey);
-              const currentDataParsed = currentData ? JSON.parse(currentData) : null;
-              const previousDataParsed = previousData ? JSON.parse(previousData) : null;
+              let currentDataParsed = null;
+              let previousDataParsed = null;
+              let currentData = null;
+              let previousData = null;
+              if (currentRedisKey && previousRedisKey) {
+                // console.log("currentRedisKey", hour, minute);
+                try {
+                  currentData = await client.get(currentRedisKey);
+                  previousData = await client.get(previousRedisKey);
+                  currentDataParsed = currentData ? JSON.parse(currentData) : null;
+                  previousDataParsed = previousData ? JSON.parse(previousData) : null;
+                } catch (error) {
+                  console.log("currentRedisKey", currentRedisKey);
+                  console.error("Error getting market 30 data:", error);
+                }
+              } else {
+                // console.log("skipping the operation for that minute:", minute, currentRedisKey, previousRedisKey, hour);
+                continue;
+              }
 
               if (currentDataParsed && previousDataParsed) {
                 const volChange = currentDataParsed.vol_traded_today - previousDataParsed.vol_traded_today;
@@ -350,6 +364,8 @@ export const calculateByAmount = async () => {
             ExpiryTime
           );
         }
+      } else {
+        console.log("skipping the operation for that hour:", hour);
       }
     }
 
@@ -374,4 +390,20 @@ export const getDataByAmount = async (amount) => {
   }
   return list;
 };
+
+export const setHistoryData = async (symbol, history) => {
+  const getCurrentTime = new Date();
+  const currentDay = getCurrentTime.getDate();
+  const redisKey = `history:${currentDay}:${symbol}`;
+  await client.set(redisKey, JSON.stringify(history), ExpiryTime);
+};
+
+export const getHistoryData = async (symbol) => {
+  const getCurrentTime = new Date();
+  const currentDay = getCurrentTime.getDate();
+  const redisKey = `history:${currentDay}:${symbol}`;
+  const data = await client.get(redisKey);
+  return JSON.parse(data);
+};
+
 export default client;

@@ -1,8 +1,9 @@
 import { NIFTY_200_LIST } from "../data/data.mjs";
-import { setMarketData } from "./redis.controller.mjs";
+import { setMarketData, setHistoryData, getHistoryData } from "./redis.controller.mjs";
 import { FYERS_CLIENT_ID } from "../data/env.mjs";
 import { fyersDataSocket, fyersModel } from "fyers-api-v3";
 import { STOCK_LIST } from "../data/data.mjs";
+import dayjs from "dayjs";
 
 var fyersdata;
 var fyersAPI;
@@ -95,19 +96,60 @@ export const getFyersAPI = (accessToken) => {
   return fyersAPI;
 };
 
+const DateFormat = "0";
+
 export const getHistory = async (req, res) => {
   if (!fyersAPI) return res.send({ status: 400, message: "Fyers API not connected" });
   try {
-    var inp = {
-      symbol: "NSE:SBIN-EQ",
-      resolution: "D",
-      date_format: "0",
-      range_from: "1690895316",
-      range_to: "1691068173",
-      cont_flag: "1",
-    };
-    const history = await fyersAPI.getHistory(inp);
-    res.send({ status: 200, history });
+    const historyData = await getHistoryData(STOCK_LIST[0]);
+    console.log("historyData", historyData);
+    if (historyData) {
+      return res.send({ status: 200, message: "Already fetched" });
+    }
+
+    // Process symbols one at a time with a 1-second delay to avoid hitting API rate limits
+    for (const symbol of STOCK_LIST) {
+      try {
+        // History of past 10 days
+        const range_from = dayjs().subtract(10, "day").unix(); // epoch time in seconds
+        const range_to = dayjs().subtract(1, "day").unix(); // epoch time in seconds
+        var inp = {
+          symbol: symbol,
+          resolution: "D",
+          date_format: DateFormat,
+          range_from: range_from,
+          range_to: range_to,
+          cont_flag: "1",
+        };
+        const history = await fyersAPI.getHistory(inp);
+        // history.candles is an array of objects with date and close price
+        // 1.Current epoch time
+        // 2. Open Value
+        // 3.Highest Value
+        // 4.Lowest Value
+        // 5.Close Value
+        // 6.Total traded quantity (volume)
+        const newlist = [];
+        const totalVolume = 0;
+        const totalDays = 0;
+        history.candles.forEach((item) => {
+          totalVolume += item[5];
+          totalDays++;
+        });
+
+        await setHistoryData(symbol, {
+          totalVolume,
+          totalDays,
+        });
+
+        // Add a 1-second delay between API calls to avoid hitting rate limits
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        // console.log(`Fetched history for ${symbol}`);
+      } catch (error) {
+        console.error(`Error fetching history for ${symbol}:`, error);
+      }
+    }
+    res.send({ status: 200, message: "History fetched" });
   } catch (err) {
     console.log(err);
     res.send({ status: 400, message: err });
