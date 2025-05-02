@@ -229,8 +229,10 @@ export const getMarket30Data = async (symbol) => {
 };
 
 const amountKey = "amount";
+const volKey = "vol";
 const baseAmount = 10000000;
 let isRunning = false;
+
 export const calculateByAmount = async (amount) => {
   if (!client) {
     console.error("Redis Client not initialized");
@@ -245,8 +247,10 @@ export const calculateByAmount = async (amount) => {
     console.log("calculateByAmount", amount);
     // Loop through the list of symbols
     const list = {};
+    const volList = {};
     for (let i = 0; i < 10; i++) {
       list[`${baseAmount * i}`] = {};
+      volList[`${i + 1}`] = {};
     }
 
     // Trading starts at 9:15 AM and Ends at 3:30 PM
@@ -255,8 +259,11 @@ export const calculateByAmount = async (amount) => {
     const currentHour = getCurrentTime.getHours();
     const currentMinute = getCurrentTime.getMinutes();
 
+    let volHistory = fs.readFileSync(`vol-list-${currentDay}.json`, "utf8");
+    if (volHistory) volHistory = JSON.parse(volHistory);
+
     for (const hour of TRADING_HOURS) {
-      if (hour <= currentHour && TRADING_HOURS.includes(currentHour)) {
+      if (hour <= currentHour) {
         // Check if the currentRedisKey exists for that hour
         const checkRedisKey = `${amountKey}:${amount}:*:${currentDay}-${hour}-*`;
         console.log("checkRedisKey", checkRedisKey);
@@ -341,6 +348,24 @@ export const calculateByAmount = async (amount) => {
                     await client.set(redisKey, JSON.stringify(obj), ExpiryTime);
                   }
                 }
+                if (volHistory && volHistory[sym] && volHistory[sym].avgVolume) {
+                  const avgVolume = volHistory[sym].avgVolume;
+                  for (const lvol of Object.keys(volList)) {
+                    if (volAmount > avgVolume * lvol) {
+                      const redisKey = `${volKey}:${lvol}:${sym}:${currentDay}-${hour}-${minute}`;
+                      const obj = {
+                        symbol: sym,
+                        ltp: currentDataParsed.ltp,
+                        avgVolume: avgVolume,
+                        volChange: volChange,
+                        amount: volAmount,
+                        last_traded_time: currentDataParsed.last_traded_time,
+                      };
+                      volList[lvol][redisKey] = obj;
+                      await client.set(redisKey, JSON.stringify(obj), ExpiryTime);
+                    }
+                  }
+                }
               }
               // list[sym] = {};
 
@@ -389,6 +414,9 @@ export const calculateByAmount = async (amount) => {
     for (const lamount of Object.keys(list)) {
       fs.writeFileSync(`data-${lamount}.json`, JSON.stringify(list[lamount]));
     }
+    for (const lvol of Object.keys(volList)) {
+      fs.writeFileSync(`vol-${lvol}.json`, JSON.stringify(volList[lvol]));
+    }
   } catch (error) {
     console.error("Error calculating by amount:", error);
   } finally {
@@ -403,6 +431,17 @@ export const getDataByAmount = async (amount) => {
     list = JSON.parse(data);
   } catch (error) {
     console.error("Error getting data by amount:", error);
+  }
+  return list;
+};
+
+export const getDataByVol = async (vol) => {
+  let list = {};
+  try {
+    const data = fs.readFileSync(`vol-${vol}.json`, "utf8");
+    list = JSON.parse(data);
+  } catch (error) {
+    console.error("Error getting data by vol:", error);
   }
   return list;
 };
@@ -428,6 +467,32 @@ export const getHistoryData = async (symbol) => {
   const redisKey = `history:${currentDay}:${symbol}`;
   const data = await client.get(redisKey);
   return JSON.parse(data);
+};
+
+export const getAllHistoryData = async () => {
+  if (!client) {
+    console.error("Redis Client not initialized");
+    return;
+  }
+  const getCurrentTime = new Date();
+  const currentDay = getCurrentTime.getDate();
+  const redisKey = `history:${currentDay}:*`;
+  let cursor = 0;
+  let keys = [];
+  do {
+    const result = await client.scan(cursor, {
+      MATCH: redisKey,
+      COUNT: 100,
+    });
+    cursor = result.cursor;
+    keys = keys.concat(result.keys);
+  } while (cursor !== 0);
+  const data = {};
+  for (const key of keys) {
+    const value = await client.get(key);
+    data[key] = JSON.parse(value);
+  }
+  return data;
 };
 
 export default client;

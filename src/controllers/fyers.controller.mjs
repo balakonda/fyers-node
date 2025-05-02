@@ -4,7 +4,7 @@ import { FYERS_CLIENT_ID } from "../data/env.mjs";
 import { fyersDataSocket, fyersModel } from "fyers-api-v3";
 import { STOCK_LIST } from "../data/data.mjs";
 import dayjs from "dayjs";
-
+import fs from "fs";
 var fyersdata;
 var fyersAPI;
 const clientId = FYERS_CLIENT_ID;
@@ -107,11 +107,13 @@ export const getHistory = async (req, res) => {
       return res.send({ status: 200, message: "Already fetched" });
     }
 
+    const volList = {};
+
     // Process symbols one at a time with a 1-second delay to avoid hitting API rate limits
     for (const symbol of STOCK_LIST) {
       try {
         // History of past 10 days
-        const range_from = dayjs().subtract(10, "day").unix(); // epoch time in seconds
+        const range_from = dayjs().subtract(20, "day").unix(); // epoch time in seconds
         const range_to = dayjs().subtract(1, "day").unix(); // epoch time in seconds
         var inp = {
           symbol: symbol,
@@ -132,15 +134,21 @@ export const getHistory = async (req, res) => {
         const newlist = [];
         let totalVolume = 0;
         let totalDays = 0;
-        history.candles.forEach((item) => {
-          totalVolume += item[5];
+        const length = history.candles.length;
+        // Loop from last for max 10 days
+        for (let i = length - 1; i >= 0 && i >= length - 10; i--) {
+          totalVolume += history.candles[i][5];
           totalDays++;
-        });
-
-        await setHistoryData(symbol, {
+        }
+        const payload = {
           totalVolume,
           totalDays,
-        });
+          avgVolume: Math.round(totalVolume / (totalDays * 375)), // 375 is the number of trading minutes in a day
+          // history: history.candles,
+        };
+        await setHistoryData(symbol, payload);
+
+        volList[symbol] = payload;
 
         // Add a 1-second delay between API calls to avoid hitting rate limits
         await new Promise((resolve) => setTimeout(resolve, 250));
@@ -149,6 +157,10 @@ export const getHistory = async (req, res) => {
         console.error(`Error fetching history for ${symbol}:`, error);
       }
     }
+
+    const currentDay = new Date().getDate();
+    fs.writeFileSync(`vol-list-${currentDay}.json`, JSON.stringify(volList));
+
     res.send({ status: 200, message: "History fetched" });
   } catch (err) {
     console.log(err);

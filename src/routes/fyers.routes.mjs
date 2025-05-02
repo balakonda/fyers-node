@@ -1,6 +1,16 @@
 import express from "express";
 import { connectFyers, disconnectFyers, testConnection, getHistory } from "../controllers/fyers.controller.mjs";
-import { initRedisClient, getMarketData, getAllMarketData, getMarket30Data, getAllMarket30Data, calculateByAmount, getDataByAmount } from "../controllers/redis.controller.mjs";
+import {
+  initRedisClient,
+  getMarketData,
+  getAllMarketData,
+  getMarket30Data,
+  getAllMarket30Data,
+  calculateByAmount,
+  getDataByAmount,
+  getAllHistoryData,
+  getDataByVol,
+} from "../controllers/redis.controller.mjs";
 
 const router = express.Router();
 
@@ -59,6 +69,18 @@ router.get("/get-by-amount", async (req, res) => {
   res.send({ status: 200, data });
 });
 
+// /get-by-vol?vol=1
+router.get("/get-by-vol", async (req, res) => {
+  const { vol } = req.query;
+  const data = await getDataByVol(vol);
+  res.send({ status: 200, data });
+});
+
 router.get("/get-history", getHistory);
+
+router.get("/get-all-history", async (req, res) => {
+  const data = await getAllHistoryData();
+  res.send({ status: 200, data });
+});
 
 export default router;
