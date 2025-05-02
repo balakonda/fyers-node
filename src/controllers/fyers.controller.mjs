@@ -130,8 +130,8 @@ export const getHistory = async (req, res) => {
         // 5.Close Value
         // 6.Total traded quantity (volume)
         const newlist = [];
-        const totalVolume = 0;
-        const totalDays = 0;
+        let totalVolume = 0;
+        let totalDays = 0;
         history.candles.forEach((item) => {
           totalVolume += item[5];
           totalDays++;
