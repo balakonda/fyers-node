@@ -88,6 +88,10 @@ export const setMarketData = async (data) => {
 };
 
 export const getMarketData = async (symbol) => {
+  if (!client) {
+    console.error("Redis Client not initialized");
+    return;
+  }
   const splitted = symbol?.split(",");
   // Get all market data for a symbol
   let data = {};
@@ -160,6 +164,10 @@ export const getAllMarketData = async () => {
 };
 
 export const getAllMarket30Data = async () => {
+  if (!client) {
+    console.error("Redis Client not initialized");
+    return;
+  }
   const list = {};
   const getCurrentTime = new Date();
   const currentHours = getCurrentTime.getHours();
@@ -204,6 +212,10 @@ export const getAllMarket30Data = async () => {
 };
 
 export const getMarket30Data = async (symbol) => {
+  if (!client) {
+    console.error("Redis Client not initialized");
+    return;
+  }
   const splitted = symbol?.split(",");
   const list = [];
   for (const sym of splitted) {
@@ -220,6 +232,10 @@ const amountKey = "amount";
 const baseAmount = 10000000;
 let isRunning = false;
 export const calculateByAmount = async (amount) => {
+  if (!client) {
+    console.error("Redis Client not initialized");
+    return;
+  }
   if (isRunning) {
     console.log("calculateByAmount is already running");
     return;
@@ -392,6 +408,10 @@ export const getDataByAmount = async (amount) => {
 };
 
 export const setHistoryData = async (symbol, history) => {
+  if (!client) {
+    console.error("Redis Client not initialized");
+    return;
+  }
   const getCurrentTime = new Date();
   const currentDay = getCurrentTime.getDate();
   const redisKey = `history:${currentDay}:${symbol}`;
@@ -399,6 +419,10 @@ export const setHistoryData = async (symbol, history) => {
 };
 
 export const getHistoryData = async (symbol) => {
+  if (!client) {
+    console.error("Redis Client not initialized");
+    return;
+  }
   const getCurrentTime = new Date();
   const currentDay = getCurrentTime.getDate();
   const redisKey = `history:${currentDay}:${symbol}`;
