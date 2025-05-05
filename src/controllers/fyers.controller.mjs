@@ -5,6 +5,7 @@ import { fyersDataSocket, fyersModel } from "fyers-api-v3";
 import { STOCK_LIST } from "../data/data.mjs";
 import dayjs from "dayjs";
 import fs from "fs";
+
 var fyersdata;
 var fyersAPI;
 const clientId = FYERS_CLIENT_ID;
@@ -135,23 +136,79 @@ export const getHistory = async (req, res) => {
         let totalVolume = 0;
         let totalDays = 0;
         const length = history.candles.length;
+        const maxDays = 10;
+        let volByDays = {
+          1: {
+            volume: 0,
+            days: 0,
+          },
+          2: {
+            volume: 0,
+            days: 0,
+          },
+          3: {
+            volume: 0,
+            days: 0,
+          },
+          4: {
+            volume: 0,
+            days: 0,
+          },
+          5: {
+            volume: 0,
+            days: 0,
+          },
+          6: {
+            volume: 0,
+            days: 0,
+          },
+          7: {
+            volume: 0,
+            days: 0,
+          },
+          8: {
+            volume: 0,
+            days: 0,
+          },
+          9: {
+            volume: 0,
+            days: 0,
+          },
+          10: {
+            volume: 0,
+            days: 0,
+          },
+        };
         // Loop from last for max 10 days
-        for (let i = length - 1; i >= 0 && i >= length - 10; i--) {
+        for (let i = length - 1; i >= 0 && i >= length - maxDays; i--) {
           totalVolume += history.candles[i][5];
           totalDays++;
+          volByDays[totalDays].volume += totalVolume;
+          volByDays[totalDays].days = totalDays;
+        }
+
+        const formattedVolByDays = {};
+
+        for (const [key, value] of Object.entries(volByDays)) {
+          formattedVolByDays[key] = {
+            volume: value.volume,
+            days: value.days,
+            avgVolume: Math.round(value.volume / (value.days * 375)),
+          };
         }
         const payload = {
           totalVolume,
           totalDays,
           avgVolume: Math.round(totalVolume / (totalDays * 375)), // 375 is the number of trading minutes in a day
           // history: history.candles,
+          volByDays: formattedVolByDays,
         };
         await setHistoryData(symbol, payload);
 
         volList[symbol] = payload;
 
         // Add a 1-second delay between API calls to avoid hitting rate limits
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, 200));
         // console.log(`Fetched history for ${symbol}`);
       } catch (error) {
         console.error(`Error fetching history for ${symbol}:`, error);

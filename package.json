@@ -5,6 +5,8 @@
   "main": "app.mjs",
   "type": "module",
   "dependencies": {
+    "axios": "^1.9.0",
+    "binance-api-node": "^0.12.9",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "dayjs": "^1.11.13",
@@ -13,7 +15,8 @@
     "fyers-api-v3": "^1.4.1",
     "mongoose": "^8.13.2",
     "redis": "^4.7.0",
-    "ws": "^8.18.1"
+    "sqlite3": "^5.1.7",
+    "ws": "^8.18.2"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -23,6 +26,12 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "@eslint/js": "^9.26.0",
+    "eslint": "^9.26.0",
+    "eslint-config-prettier": "^10.1.2",
+    "eslint-plugin-prettier": "^5.2.6",
+    "globals": "^16.0.0",
+    "nodemon": "^3.1.9",
+    "prettier": "^3.5.3"
   }
 }

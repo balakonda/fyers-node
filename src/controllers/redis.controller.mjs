@@ -233,7 +233,7 @@ const volKey = "vol";
 const baseAmount = 10000000;
 let isRunning = false;
 
-export const calculateByAmount = async (amount) => {
+export const calculateByAmount = async (amount, days) => {
   if (!client) {
     console.error("Redis Client not initialized");
     return;
@@ -243,14 +243,20 @@ export const calculateByAmount = async (amount) => {
     return;
   }
   isRunning = true;
+
   try {
-    console.log("calculateByAmount", amount);
+    let numberOfDays = Number(days) || 10;
+    console.log("calculateByAmount", amount, numberOfDays);
     // Loop through the list of symbols
     const list = {};
-    const volList = {};
+    const volList = {
+      5: {},
+      10: {},
+      15: {},
+      20: {},
+    };
     for (let i = 0; i < 10; i++) {
       list[`${baseAmount * i}`] = {};
-      volList[`${i + 1}`] = {};
     }
 
     // Trading starts at 9:15 AM and Ends at 3:30 PM
@@ -260,6 +266,18 @@ export const calculateByAmount = async (amount) => {
     const currentMinute = getCurrentTime.getMinutes();
 
     let volHistory = fs.readFileSync(`vol-list-${currentDay}.json`, "utf8");
+    // History of volume list from 1 day to 10 days
+    // {[Symbol]: { volByDays: {
+    //   [day]: {
+    //     volume: number,
+    //     days: number,
+    //     avgVolume: number,
+    //   }
+    // }
+    // }
+    // }
+
+    console.log("volHistory", volHistory);
     if (volHistory) volHistory = JSON.parse(volHistory);
 
     for (const hour of TRADING_HOURS) {
@@ -348,10 +366,10 @@ export const calculateByAmount = async (amount) => {
                     await client.set(redisKey, JSON.stringify(obj), ExpiryTime);
                   }
                 }
-                if (volHistory && volHistory[sym] && volHistory[sym].avgVolume) {
-                  const avgVolume = volHistory[sym].avgVolume;
+                if (volHistory && volHistory[sym] && volHistory[sym]["volByDays"] && volHistory[sym]["volByDays"][numberOfDays]) {
+                  const avgVolume = volHistory[sym]["volByDays"][numberOfDays].avgVolume;
                   for (const lvol of Object.keys(volList)) {
-                    if (volAmount > avgVolume * lvol) {
+                    if (volChange > avgVolume * lvol) {
                       const redisKey = `${volKey}:${lvol}:${sym}:${currentDay}-${hour}-${minute}`;
                       const obj = {
                         symbol: sym,
@@ -435,7 +453,7 @@ export const getDataByAmount = async (amount) => {
   return list;
 };
 
-export const getDataByVol = async (vol) => {
+export const getDataByVol = async (vol, days) => {
   let list = {};
   try {
     const data = fs.readFileSync(`vol-${vol}.json`, "utf8");
@@ -493,6 +511,66 @@ export const getAllHistoryData = async () => {
     data[key] = JSON.parse(value);
   }
   return data;
+};
+
+export const getVolumeHistoryFromFile = async () => {
+  try {
+    const getCurrentTime = new Date();
+    const currentDay = getCurrentTime.getDate();
+    const data = fs.readFileSync(`vol-list-${currentDay}.json`, "utf8");
+    return JSON.parse(data);
+  } catch (error) {
+    console.error("Error getting volume history from file:", error);
+    return { error: error };
+  }
+};
+
+// Binance Trade Data
+const redisStreamKey = `binance:trades:`;
+export const saveTradeDataToRedis = async (trade, receivedTime) => {
+  try {
+    // Use XADD to add the trade to the Redis Stream
+    // '*' tells Redis to auto-generate a unique ID (timestamp-based)
+    // MAXLEN ~ redisStreamMaxLen caps the stream size (approximate)
+    const streamData = {
+      // Flatten the object for stream fields
+      symbol: trade.s,
+      tradeId: String(trade.t), // Store IDs as strings
+      price: trade.p,
+      quantity: trade.q,
+      buyerOrderId: String(trade.b),
+      sellerOrderId: String(trade.a),
+      tradeTime: String(trade.T),
+      isBuyerMaker: trade.m ? "1" : "0", // Store boolean as '1' or '0'
+      // isBestMatch: trade.M ? '1' : '0', // Often deprecated/not useful, check docs
+      receivedTime: String(receivedTime),
+    };
+
+    // Add entry to the stream, using tradeId 't' as the message ID for potential deduplication
+    // If you prefer Redis-generated IDs ensuring insertion order: use '*' instead of String(trade.t)
+    // Using '*' might be safer if trade IDs aren't guaranteed monotonic by the source
+    const entryId = await redisClient.xAdd(
+      redisStreamKey,
+      "*", // Let Redis generate the entry ID
+      streamData,
+      {
+        // XADD options
+        TRIM: {
+          strategy: "MAXLEN", // Trim by length
+          strategyModifier: "~", // Allow approximate trimming for performance
+          threshold: redisStreamMaxLen,
+        },
+      }
+    );
+
+    // Optional: Log the generated stream entry ID
+    // console.log(`Saved trade ${trade.t} to Redis Stream with ID: ${entryId}`);
+  } catch (error) {
+    console.error("Error saving data to Redis:", error);
+    console.error("Failed data:", trade);
+    // Consider how to handle Redis errors (e.g., retry logic, circuit breaker)
+    isRedisReady = false; // Assume connection might be lost on error
+  }
 };
 
 export default client;
