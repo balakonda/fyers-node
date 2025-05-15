@@ -103,7 +103,7 @@ export const getHistory = async (req, res) => {
   if (!fyersAPI) return res.send({ status: 400, message: "Fyers API not connected" });
   try {
     const historyData = await getHistoryData(STOCK_LIST[0]);
-    console.log("historyData", historyData);
+    // console.log("historyData", historyData);
     if (historyData) {
       return res.send({ status: 200, message: "Already fetched" });
     }

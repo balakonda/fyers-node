@@ -160,6 +160,11 @@ async function listenBinanceCandles() {
   binanceClient.ws.candles(["ETHBTC", "BNBBTC"], { interval: "1m" }, (data) => {
     console.log("listenBinanceCandles", data);
   });
+  binanceClient.ws.candles("BTCUSDT", "1m", (candlestick) => {
+    const { e: eventType, E: eventTime, s: symbol, k: ticks } = candlestick;
+    console.log("candlestick", candlestick);
+  });
+
   return true;
 }
 

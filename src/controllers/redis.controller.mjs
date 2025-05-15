@@ -277,7 +277,7 @@ export const calculateByAmount = async (amount, days) => {
     // }
     // }
 
-    console.log("volHistory", volHistory);
+    // console.log("volHistory", volHistory);
     if (volHistory) volHistory = JSON.parse(volHistory);
 
     for (const hour of TRADING_HOURS) {
