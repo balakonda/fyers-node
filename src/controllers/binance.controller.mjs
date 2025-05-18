@@ -229,7 +229,11 @@ async function listenBinanceCandles() {
   // });
   binanceClient.ws.candles(["BTCUSDT", "ETHUSDT"], "1m", async (candlestick) => {
     console.log("candlestick", candlestick);
-    storeCandlestick(candlestick);
+    storeCandlestick({
+      ...candlestick,
+      localTimeStamp: new Date().toLocaleString(),
+      localEventTime: new Date(candlestick.eventTime).toLocaleString(),
+    });
   });
 
   return true;
