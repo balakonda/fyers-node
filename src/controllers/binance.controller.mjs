@@ -1,18 +1,9 @@
 import Binance from "binance-api-node";
-
-import WebSocket from "ws";
-
-// --- Configuration ---
-// --- Configuration ---
-const symbol = "btcusdt"; // Change to the trading pair you want (lowercase)
-const streamName = `${symbol}@trade`; // Stream type: @trade, @kline_1m, @depth, etc.
-const websocketUrl = `wss://stream.binance.com:9443/ws/${streamName}`;
-const redisStreamMaxLen = 1000000; // Approx. max number of entries in the stream (adjust as needed!) Use '~' for approximate trimming.
-const reconnectInterval = 5000; // Milliseconds to wait before attempting WebSocket reconnection
+import { initBinanceRedisClient, getBinanceRedisClient, ExpiryTime } from "./redis.controller.mjs";
 
 // --- WebSocket Connection ---
-let ws;
 let binanceClient;
+const sortedSetKey = "candlestick_index";
 
 // function connectWebSocket() {
 
@@ -126,6 +117,7 @@ let binanceClient;
 async function startApp() {
   console.log("Starting binance client");
   try {
+    await initBinanceRedisClient();
     if (!binanceClient) {
       // Import Binance from 'binance-api-node' is needed at the top of the file
       binanceClient = Binance.default({
@@ -152,17 +144,92 @@ async function listenToWebSocket() {
   });
 }
 
+// Store candlestick data (example)
+async function storeCandlestick(candlestick) {
+  // const key = `candlestick:${data.startTime}`; // Unique key per candlestick
+  // await client.hSet(key, data);
+  // await client.zAdd("candlestick_index", [{ score: data.startTime, value: key }]); // Indexing by timestamp
+
+  // candlestick = {
+  //   eventType: 'kline',
+  //   eventTime: 1747377750028,
+  //   symbol: 'ETHUSDT',
+  //   startTime: 1747377720000,
+  //   closeTime: 1747377779999,
+  //   firstTradeId: 2426578688,
+  //   lastTradeId: 2426579386,
+  //   open: '2596.21000000',
+  //   high: '2596.26000000',
+  //   low: '2595.09000000',
+  //   close: '2596.25000000',
+  //   volume: '70.62320000',
+  //   trades: 699,
+  //   interval: '1m',
+  //   isFinal: false,
+  //   quoteVolume: '183318.09806100',
+  //   buyVolume: '50.52680000',
+  //   quoteBuyVolume: '131150.64603300'
+  // }
+  // - eventType: Indicates the type of event. "kline" means this data represents a candlestick (K-line).
+  // - eventTime: The timestamp when the event was generated, in milliseconds.
+  // - symbol: The trading pair, in this case, Ethereum to USDT (ETHUSDT).
+  // - startTime: The timestamp marking the beginning of the candlestick interval.
+  // - closeTime: The timestamp marking the end of the candlestick interval.
+  // - firstTradeId: The trade ID of the first transaction in this candlestick interval.
+  // - lastTradeId: The trade ID of the last transaction in this candlestick interval.
+  // - open: The opening price of the candlestick interval.
+  // - high: The highest price recorded during the candlestick interval.
+  // - low: The lowest price recorded during the candlestick interval.
+  // - close: The closing price of the candlestick interval.
+  // - volume: The total volume of the asset traded within the candlestick interval.
+  // - trades: The number of trades that occurred during the candlestick interval.
+  // - interval: The duration of the candlestick, in this case, "1m" for one minute.
+  // - isFinal: Boolean value indicating if this candlestick is the final one for the interval (false means it may still be updating).
+  // - quoteVolume: The total quoted asset volume traded during the candlestick interval.
+  // - buyVolume: The total volume of the asset bought during the candlestick interval.
+  // - quoteBuyVolume: The total quoted asset volume bought during the candlestick interval.
+
+  if (!getBinanceRedisClient()) {
+    console.log("Binance Redis not connected");
+  }
+  if (candlestick && getBinanceRedisClient()) {
+    const key = `binance:${candlestick.symbol}:${candlestick.startTime}`; // Unique key per candlestick
+
+    // // Create a flattened array of key-value pairs
+    // const flattenedObject = Object.entries(candleData).flat();
+    // console.log("flattenedObject", flattenedObject);
+    // Convert candleData object to field-value pairs for hSet
+
+    try {
+      const result = await getBinanceRedisClient().set(key, JSON.stringify(candlestick), ExpiryTime);
+      console.log(`Stored candlestick data with ${result} fields for key: ${key}`);
+
+      // Verify data was stored correctly
+      // const storedData = await getBinanceRedisClient().hGetAll(key);
+      // if (!storedData || Object.keys(storedData).length <= 1) {
+      //   console.error(`Only eventType or partial data stored in Redis for key: ${key}`);
+      //   console.debug("Attempted to store:", candleData);
+      //   console.debug("Actually stored:", storedData); // Getting storedData as [Object: null prototype] { eventType: 'kline' }
+      // }
+    } catch (error) {
+      console.error(`Failed to store candlestick data in Redis: ${error.message}`);
+    }
+    await getBinanceRedisClient().zAdd(sortedSetKey, { score: candlestick.startTime, value: key });
+    // getRedisClient().set(`binance:candles:${candlestick.symbol}:${candlestick.eventTime}`, JSON.stringify(candlestick), ExpiryTime);
+  }
+}
+
 async function listenBinanceCandles() {
   if (!binanceClient) {
     console.error("Binance client not initialized");
     return;
   }
-  binanceClient.ws.candles(["ETHBTC", "BNBBTC"], { interval: "1m" }, (data) => {
-    console.log("listenBinanceCandles", data);
-  });
-  binanceClient.ws.candles("BTCUSDT", "1m", (candlestick) => {
-    const { e: eventType, E: eventTime, s: symbol, k: ticks } = candlestick;
+  // binanceClient.ws.candles(["ETHBTC", "BNBBTC"], { interval: "1m" }, (data) => {
+  //   console.log("listenBinanceCandles", data);
+  // });
+  binanceClient.ws.candles(["BTCUSDT", "ETHUSDT"], "1m", async (candlestick) => {
     console.log("candlestick", candlestick);
+    storeCandlestick(candlestick);
   });
 
   return true;
@@ -203,6 +270,55 @@ async function getAccountInfo() {
   }
 }
 
+// Retrieve all candlesticks within a minute
+async function getCandlesticksInMinute() {
+  const now = Date.now(); // Current timestamp in milliseconds
+  const fiveMinutesAgo = now - 5 * 60 * 1000; // Timestamp 5 minutes ago
+
+  try {
+    // Use ZRANGEBYSCORE to get members and scores within the time range
+    // The range is inclusive by default [min, max]
+    const results = await getBinanceRedisClient().zRangeByScore(sortedSetKey, fiveMinutesAgo, now);
+
+    console.log(`Elements added in the last 5 minutes for key "${sortedSetKey}":`, results);
+
+    // The 'results' array will be [member1, score1, member2, score2, ...]
+    // We need to iterate through it to extract members and scores
+    // const retrievedData = [];
+    // for (let i = 0; i < results.length; i++) {
+    //   const member = results[i];
+    //   const score = parseFloat(results[i + 1]); // Scores are returned as strings, parse them to numbers
+    //   retrievedData.push({ member, score });
+    //   console.log(`  Member: ${member}, Timestamp (Score): ${score}`);
+    // }
+    try {
+      const candlesticks = await Promise.all(
+        results.map(async (key) => {
+          const data = await getBinanceRedisClient().get(key);
+          return JSON.parse(data);
+        })
+      );
+      return candlesticks;
+    } catch (error) {
+      console.error("Error retrieving data from Redis:", error);
+      throw error;
+    }
+  } catch (error) {
+    console.error("Error retrieving data from Redis:", error);
+    throw error;
+  } finally {
+    // Close the connection if necessary, depending on your application's architecture
+    // redis.quit();
+  }
+  // const keys = await getBinanceRedisClient().zRangeWithScores("candlestick_index", 0, -1);
+  // console.log("keys", keys); // [ { value: 'binance:BTCUSDT:1747380300000', score: 1747380300000 }]
+
+  // const candlesticks = await Promise.all(keys.map((key) => getBinanceRedisClient().get(key.value)));
+
+  // // const candlesticks = await Promise.all(keys.map((key) => getBinanceRedisClient().get(key)));
+  // return candlesticks;
+}
+
 // startApp();
 
 // // --- Graceful Shutdown ---
@@ -230,4 +346,4 @@ async function getAccountInfo() {
 //   console.log("Exiting.");
 //   process.exit(0);
 // });
-export { startApp, listenToWebSocket, testBinanceClient, getExchangeInfo, listenBinanceCandles, getAccountInfo };
+export { startApp, listenToWebSocket, testBinanceClient, getExchangeInfo, listenBinanceCandles, getAccountInfo, getCandlesticksInMinute };

@@ -14,7 +14,7 @@ import {
   saveTradeDataToRedis,
 } from "../controllers/redis.controller.mjs";
 
-import { getExchangeInfo, testBinanceClient, startApp, listenBinanceCandles, getAccountInfo } from "../controllers/binance.controller.mjs";
+import { getExchangeInfo, testBinanceClient, startApp, listenBinanceCandles, getAccountInfo, getCandlesticksInMinute } from "../controllers/binance.controller.mjs";
 
 const router = express.Router();
 
@@ -158,6 +158,16 @@ router.get("/get-binance-account-info", async (req, res) => {
     res.send({ status: 400, message: "Error getting binance account info" });
   }
 });
+
+router.get("/get-binance-candlesticks", async (req, res) => {
+  const response = await getCandlesticksInMinute();
+  if (response) {
+    res.send({ status: 200, message: "Binance candlesticks", response });
+  } else {
+    res.send({ status: 400, message: "Error getting binance candlesticks" });
+  }
+});
+
 // // POST /stop
 // router.post("/stop", (req, res) => {
 //   if (!shouldBeRunning) {

@@ -3,14 +3,18 @@ import { STOCK_LIST, MINUTES, TRADING_HOURS } from "../data/data.mjs";
 import fs from "fs";
 
 let client;
+let binanceRedisClient;
 
 export const initRedisClient = async () => {
   //   const client = await createClient().on("error", (err) => console.log("Redis Client Error", err));
 
   //   const connected = await client.connect();
-  if (client) return;
+  if (client) {
+    console.log("Redis Client already initialized");
+    return;
+  }
   client = createClient({
-    url: "redis://localhost:6379",
+    url: "redis://localhost:6379/0",
     // legacyMode: true,
   });
 
@@ -32,7 +36,38 @@ export const initRedisClient = async () => {
   }
 };
 
-const ExpiryTime = { EX: 86400 }; // 24 hours
+export const initBinanceRedisClient = async () => {
+  //   const client = await createClient().on("error", (err) => console.log("Redis Client Error", err));
+
+  //   const connected = await client.connect();
+  if (binanceRedisClient) {
+    console.log("Redis Client already initialized");
+    return;
+  }
+  binanceRedisClient = createClient({
+    url: "redis://localhost:6379/1",
+    // legacyMode: true,
+  });
+
+  await binanceRedisClient.connect();
+
+  await binanceRedisClient.ping();
+
+  console.log("BinanceRedis connect();", binanceRedisClient);
+
+  try {
+    // Store some data
+    await binanceRedisClient.set("myKey", "myValue");
+
+    // Retrieve the data
+    const value = await binanceRedisClient.get("myKey");
+    console.log("Value:", value); // Output: myValue
+  } catch (error) {
+    console.error("Error:", error);
+  }
+};
+
+export const ExpiryTime = { EX: 86400 }; // 24 hours
 
 export const setMarketData = async (data) => {
   //   console.log("setMarketData", data);
@@ -571,6 +606,10 @@ export const saveTradeDataToRedis = async (trade, receivedTime) => {
     // Consider how to handle Redis errors (e.g., retry logic, circuit breaker)
     isRedisReady = false; // Assume connection might be lost on error
   }
+};
+
+export const getBinanceRedisClient = () => {
+  return binanceRedisClient;
 };
 
 export default client;
