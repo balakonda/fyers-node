@@ -14,7 +14,7 @@ import {
   saveTradeDataToRedis,
 } from "../controllers/redis.controller.mjs";
 
-import { getExchangeInfo, testBinanceClient, startApp, listenBinanceCandles, getAccountInfo, getCandlesticksInMinute } from "../controllers/binance.controller.mjs";
+import { getExchangeInfo, testBinanceClient, startApp, listenBinanceCandles, getAccountInfo, getCandlesticksInMinute, getCandlesticksByAmount } from "../controllers/binance.controller.mjs";
 
 const router = express.Router();
 
@@ -165,6 +165,15 @@ router.get("/get-binance-candlesticks", async (req, res) => {
     res.send({ status: 200, message: "Binance candlesticks", response });
   } else {
     res.send({ status: 400, message: "Error getting binance candlesticks" });
+  }
+});
+
+// get-binance-candlesticks-by-amount?amount=1000000
+router.get("/get-binance-candlesticks-by-amount", async (req, res) => {
+  const { amount } = req.query;
+  const response = await getCandlesticksByAmount(amount);
+  if (response) {
+    res.send({ status: 200, message: "Binance candlesticks by amount", response });
   }
 });
 

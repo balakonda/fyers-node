@@ -4,6 +4,11 @@ import { initBinanceRedisClient, getBinanceRedisClient, ExpiryTime } from "./red
 // --- WebSocket Connection ---
 let binanceClient;
 const sortedSetKey = "candlestick_index";
+let binanceFutureSymbols = [];
+const oneCr = 10000000;
+const totalCrs = 20;
+const crSortedSetKey = "binance_cr";
+const usdttoinr = 85;
 
 // function connectWebSocket() {
 
@@ -113,6 +118,15 @@ const sortedSetKey = "candlestick_index";
 // }
 
 // --- Application Start ---
+async function getBinanceFutureSymbols() {
+  if (binanceFutureSymbols.length > 0) return binanceFutureSymbols;
+  if (!binanceClient) return;
+  const response = await binanceClient.futuresExchangeInfo();
+  console.log(response);
+  binanceFutureSymbols = response.symbols.map((symbol) => symbol.symbol);
+  console.log("binanceFutureSymbols", binanceFutureSymbols);
+  return binanceFutureSymbols;
+}
 
 async function startApp() {
   console.log("Starting binance client");
@@ -126,6 +140,7 @@ async function startApp() {
       });
     }
     console.log("Binance client initialized");
+    await getBinanceFutureSymbols();
     return binanceClient;
   } catch (error) {
     console.error("Error starting binance client:", error);
@@ -139,17 +154,109 @@ async function listenToWebSocket() {
     console.error("Binance client not initialized");
     return;
   }
-  binanceClient.ws.on("message", function incoming(data) {
-    console.log(data);
-  });
+  await getBinanceFutureSymbols();
+  // binanceClient.ws.on("message", function incoming(data) {
+  //   console.log(data);
+  // });
+}
+
+async function createCrSortedSet(key, candlestick) {
+  try {
+    console.log("Creating CR sorted set");
+    for (let i = 1; i <= totalCrs; i++) {
+      if (candlestick.amount * usdttoinr > oneCr * i) {
+        console.log(`${crSortedSetKey}:${i}`, { score: candlestick.amount, value: key });
+        // Create sorted set for each CR and save the key
+        await getBinanceRedisClient().zAdd(`${crSortedSetKey}:${i}`, { score: candlestick.amount, value: key });
+      }
+    }
+  } catch (error) {
+    console.error("Error creating CR sorted set:", error);
+  }
+}
+
+async function getCandlesticksByAmount(amount) {
+  const sortedKeyByAmount = `${crSortedSetKey}:${Math.floor(amount / oneCr)}`;
+  console.log("sortedKeyByAmount", sortedKeyByAmount);
+  try {
+    const crSortedSet = await getBinanceRedisClient().zRange(sortedKeyByAmount, 0, -1);
+    // console.log("crSortedSet", crSortedSet);
+    const candlesticks = await Promise.all(
+      crSortedSet.map(async (key) => {
+        const data = await getBinanceRedisClient().get(key);
+        return JSON.parse(data);
+      })
+    );
+    // console.log("candlesticks", candlesticks);
+    return candlesticks;
+  } catch (error) {
+    console.error("Error getting candlesticks by amount:", error);
+    return [];
+  }
 }
 
 // Store candlestick data (example)
 async function storeCandlestick(candlestick) {
-  // const key = `candlestick:${data.startTime}`; // Unique key per candlestick
-  // await client.hSet(key, data);
-  // await client.zAdd("candlestick_index", [{ score: data.startTime, value: key }]); // Indexing by timestamp
+  // candlestick - {
+  //   symbol: 'BTCUSDT',
+  //   startTime: 1747380300000,
+  //   close: 2596.25,
+  //   volume: 70.6232,
+  //   amount: 183318.098061,
+  //   isFinal: true,
+  //   localTimeStamp: '2025-05-18 10:45:00',
+  //   localEventTime: '2025-05-18 10:45:00',
+  // }
+  console.log("candlestick", candlestick);
+  if (!getBinanceRedisClient()) {
+    console.log("Binance Redis not connected");
+  }
+  if (candlestick && getBinanceRedisClient()) {
+    const key = `binance:${candlestick.symbol}:${candlestick.startTime}`; // Unique key per candlestick
 
+    // // Create a flattened array of key-value pairs
+    // const flattenedObject = Object.entries(candleData).flat();
+    // console.log("flattenedObject", flattenedObject);
+    // Convert candleData object to field-value pairs for hSet
+
+    try {
+      const result = await getBinanceRedisClient().set(key, JSON.stringify(candlestick), ExpiryTime);
+      console.log(`Stored candlestick data with ${result} fields for key: ${key}`);
+
+      createCrSortedSet(key, candlestick);
+
+      // Verify data was stored correctly
+      // const storedData = await getBinanceRedisClient().hGetAll(key);
+      // if (!storedData || Object.keys(storedData).length <= 1) {
+      //   console.error(`Only eventType or partial data stored in Redis for key: ${key}`);
+      //   console.debug("Attempted to store:", candleData);
+      //   console.debug("Actually stored:", storedData); // Getting storedData as [Object: null prototype] { eventType: 'kline' }
+      // }
+    } catch (error) {
+      console.error(`Failed to store candlestick data in Redis: ${error.message}`);
+    }
+    await getBinanceRedisClient().zAdd(sortedSetKey, { score: candlestick.startTime, value: key });
+    // getRedisClient().set(`binance:candles:${candlestick.symbol}:${candlestick.eventTime}`, JSON.stringify(candlestick), ExpiryTime);
+  }
+}
+
+let isListening = false;
+async function listenBinanceCandles() {
+  if (!binanceClient) {
+    console.error("Binance client not initialized");
+    return;
+  }
+  // binanceClient.ws.candles(["ETHBTC", "BNBBTC"], { interval: "1m" }, (data) => {
+  //   console.log("listenBinanceCandles", data);
+  // });
+  // binanceClient.ws.candles(["BTCUSDT", "ETHUSDT"], "1m", async (candlestick) => {
+  //   console.log("candlestick", candlestick);
+  //   storeCandlestick({
+  //     ...candlestick,
+  //     localTimeStamp: new Date().toLocaleString(),
+  //     localEventTime: new Date(candlestick.eventTime).toLocaleString(),
+  //   });
+  // });
   // candlestick = {
   //   eventType: 'kline',
   //   eventTime: 1747377750028,
@@ -189,52 +296,31 @@ async function storeCandlestick(candlestick) {
   // - buyVolume: The total volume of the asset bought during the candlestick interval.
   // - quoteBuyVolume: The total quoted asset volume bought during the candlestick interval.
 
-  if (!getBinanceRedisClient()) {
-    console.log("Binance Redis not connected");
-  }
-  if (candlestick && getBinanceRedisClient()) {
-    const key = `binance:${candlestick.symbol}:${candlestick.startTime}`; // Unique key per candlestick
+  if (binanceFutureSymbols.length === 0 || isListening) return;
+  try {
+    binanceClient.ws.futuresCandles(binanceFutureSymbols.slice(0, 100), "1m", async (candlestick) => {
+      isListening = true;
 
-    // // Create a flattened array of key-value pairs
-    // const flattenedObject = Object.entries(candleData).flat();
-    // console.log("flattenedObject", flattenedObject);
-    // Convert candleData object to field-value pairs for hSet
-
-    try {
-      const result = await getBinanceRedisClient().set(key, JSON.stringify(candlestick), ExpiryTime);
-      console.log(`Stored candlestick data with ${result} fields for key: ${key}`);
-
-      // Verify data was stored correctly
-      // const storedData = await getBinanceRedisClient().hGetAll(key);
-      // if (!storedData || Object.keys(storedData).length <= 1) {
-      //   console.error(`Only eventType or partial data stored in Redis for key: ${key}`);
-      //   console.debug("Attempted to store:", candleData);
-      //   console.debug("Actually stored:", storedData); // Getting storedData as [Object: null prototype] { eventType: 'kline' }
-      // }
-    } catch (error) {
-      console.error(`Failed to store candlestick data in Redis: ${error.message}`);
-    }
-    await getBinanceRedisClient().zAdd(sortedSetKey, { score: candlestick.startTime, value: key });
-    // getRedisClient().set(`binance:candles:${candlestick.symbol}:${candlestick.eventTime}`, JSON.stringify(candlestick), ExpiryTime);
-  }
-}
-
-async function listenBinanceCandles() {
-  if (!binanceClient) {
-    console.error("Binance client not initialized");
-    return;
-  }
-  // binanceClient.ws.candles(["ETHBTC", "BNBBTC"], { interval: "1m" }, (data) => {
-  //   console.log("listenBinanceCandles", data);
-  // });
-  binanceClient.ws.candles(["BTCUSDT", "ETHUSDT"], "1m", async (candlestick) => {
-    console.log("candlestick", candlestick);
-    storeCandlestick({
-      ...candlestick,
-      localTimeStamp: new Date().toLocaleString(),
-      localEventTime: new Date(candlestick.eventTime).toLocaleString(),
+      if (candlestick?.isFinal) {
+        try {
+          storeCandlestick({
+            symbol: candlestick.symbol,
+            startTime: candlestick.startTime,
+            close: Number(candlestick.close),
+            volume: Number(candlestick.volume),
+            amount: Number(candlestick.close) * Number(candlestick.volume),
+            isFinal: candlestick.isFinal,
+            localTimeStamp: new Date().toLocaleString(),
+            localEventTime: new Date(candlestick.eventTime).toLocaleString(),
+          });
+        } catch (error) {
+          console.error("Error storing candlestick data in Redis:", error);
+        }
+      }
     });
-  });
+  } catch (error) {
+    console.error("Error listening to binance candles:", error);
+  }
 
   return true;
 }
@@ -350,4 +436,4 @@ async function getCandlesticksInMinute() {
 //   console.log("Exiting.");
 //   process.exit(0);
 // });
-export { startApp, listenToWebSocket, testBinanceClient, getExchangeInfo, listenBinanceCandles, getAccountInfo, getCandlesticksInMinute };
+export { startApp, listenToWebSocket, testBinanceClient, getExchangeInfo, listenBinanceCandles, getAccountInfo, getCandlesticksInMinute, getCandlesticksByAmount };
