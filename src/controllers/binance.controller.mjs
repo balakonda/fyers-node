@@ -8,7 +8,13 @@ let binanceFutureSymbols = [];
 const oneCr = 10000000;
 const totalCrs = 20;
 const crSortedSetKey = "binance_cr";
+const volumeSortedSetKey = "binance_vx";
+const volumeSortedSetList = [1, 5, 10, 15, 20];
 const usdttoinr = 85;
+const currentDate = new Date();
+const currentDay = currentDate.getDate();
+const currentMonth = currentDate.getMonth() + 1;
+const currentDateMonthString = `${currentDay}${currentMonth}`;
 
 // function connectWebSocket() {
 
@@ -122,7 +128,7 @@ async function getBinanceFutureSymbols() {
   if (binanceFutureSymbols.length > 0) return binanceFutureSymbols;
   if (!binanceClient) return;
   const response = await binanceClient.futuresExchangeInfo();
-  console.log(response);
+  // console.log(response);
   binanceFutureSymbols = response.symbols.map((symbol) => symbol.symbol);
   console.log("binanceFutureSymbols", binanceFutureSymbols);
   return binanceFutureSymbols;
@@ -175,6 +181,31 @@ async function createCrSortedSet(key, candlestick) {
   }
 }
 
+async function createVolumeSortedSet(key, candlestick) {
+  try {
+    console.log("Creating volume sorted set");
+    //  Get the Avg volume of past 5 days for the symbol from redis
+    const avgVolume = await getBinanceRedisClient().hGet(`binance_vm:${currentDateMonthString}:${candlestick.symbol}`, "volume");
+    if (avgVolume) {
+      // console.log("Volume already in Redis", candlestick.symbol, avgVolume);
+      // Compare the volume with the avg volume of past 5 days, get the x times of the avg volume
+      if (avgVolume && candlestick.volume) {
+        const x = candlestick.volume / avgVolume;
+        // Save it in sorted set of 5, 10, 15, 20
+        for (const volume of volumeSortedSetList) {
+          if (x > volume) {
+            console.log("x", x);
+            await getBinanceRedisClient().zAdd(`${volumeSortedSetKey}:${volume}`, { score: x, value: key });
+          }
+        }
+      }
+      return;
+    }
+  } catch (error) {
+    console.error("Error creating volume sorted set:", error);
+  }
+}
+
 async function getCandlesticksByAmount(amount) {
   const sortedKeyByAmount = `${crSortedSetKey}:${Math.floor(amount / oneCr)}`;
   console.log("sortedKeyByAmount", sortedKeyByAmount);
@@ -188,9 +219,32 @@ async function getCandlesticksByAmount(amount) {
       })
     );
     // console.log("candlesticks", candlesticks);
-    return candlesticks;
+    return candlesticks.filter((candlestick) => !!candlestick);
   } catch (error) {
     console.error("Error getting candlesticks by amount:", error);
+    return [];
+  }
+}
+
+async function getCandlesticksByVolume(volume) {
+  if (!volume) return [];
+  if (!volumeSortedSetList.includes(Number(volume))) return [];
+
+  const sortedKeyByVolume = `${volumeSortedSetKey}:${volume}`;
+  console.log("sortedKeyByVolume", sortedKeyByVolume);
+  try {
+    const volumeSortedSet = await getBinanceRedisClient().zRange(sortedKeyByVolume, 0, -1);
+    // console.log("volumeSortedSet", volumeSortedSet);
+    const candlesticks = await Promise.all(
+      volumeSortedSet.map(async (key) => {
+        const data = await getBinanceRedisClient().get(key);
+        return JSON.parse(data);
+      })
+    );
+    // console.log("candlesticks", candlesticks);
+    return candlesticks.filter((candlestick) => !!candlestick);
+  } catch (error) {
+    console.error("Error getting candlesticks by volume:", error);
     return [];
   }
 }
@@ -224,6 +278,7 @@ async function storeCandlestick(candlestick) {
       console.log(`Stored candlestick data with ${result} fields for key: ${key}`);
 
       createCrSortedSet(key, candlestick);
+      createVolumeSortedSet(key, candlestick);
 
       // Verify data was stored correctly
       // const storedData = await getBinanceRedisClient().hGetAll(key);
@@ -409,6 +464,86 @@ async function getCandlesticksInMinute() {
   // return candlesticks;
 }
 
+async function getPast5DaysVolume() {
+  // Get Current Date and Month in format DDMM
+
+  const interval = "1d"; // Timestamp 5 days ago
+  const limit = 5;
+
+  if (binanceFutureSymbols.length === 0) return "No symbols found";
+  try {
+    // Check if the volume is already in Redis
+    if (binanceFutureSymbols.length > 0) {
+      const volume = await getBinanceRedisClient().hGet(`binance_vm:${currentDateMonthString}:${binanceFutureSymbols[0]}`, "volume");
+      if (volume) {
+        console.log("Volume already in Redis", binanceFutureSymbols[0], volume);
+        return volume;
+      }
+    }
+
+    // Loop through all symbols and get the past 5 days volume. Use for-of loop and wait 250ms between each request.
+    const results = [];
+    for (const symbol of binanceFutureSymbols) {
+      try {
+        const results = await binanceClient.futuresCandles({
+          symbol,
+          interval: interval,
+          limit,
+        });
+        // results = [
+        //   {
+        //     openTime: 1508328900000,
+        //     open: "0.05655000",
+        //     high: "0.05656500",
+        //     low: "0.05613200",
+        //     close: "0.05632400",
+        //     volume: "68.88800000",
+        //     closeTime: 1508329199999,
+        //     quoteAssetVolume: "2.29500857",
+        //     trades: 85,
+        //     baseAssetVolume: "40.61900000",
+        //   },
+        // ];
+        results.push(results);
+
+        if (results.length > 0) {
+          // Avg. of volume of past 5 days
+          // console.log("getPast5DaysVolume", symbol, results.length);
+          // In a for loop, get the volume of each day and add it to a variable and also count the number of days
+          let totalVolume = 0;
+          let totalDays = 0;
+          for (const result of results) {
+            if (result && result.volume) {
+              totalVolume += Number(result.volume);
+              totalDays++;
+            }
+          }
+          // 1 day avg volume
+          const avgVolume = totalVolume / totalDays;
+          // for 1 minute, 24 hours, 60 minutes - 24*60 = 1440
+          const volumeToMinute = avgVolume / 1440;
+
+          console.log("getPast5DaysVolume", symbol, avgVolume);
+          // Save in Redis with expiry time 1 day, with hash key as symbol and value as volume
+          await getBinanceRedisClient()
+            .multi()
+            .hSet(`binance_vm:${currentDateMonthString}:${symbol}`, { volume: volumeToMinute })
+            .expire(`binance_vm:${currentDateMonthString}:${symbol}`, 86400) // Set expiry time to 1 day (86400 seconds)
+            .exec();
+        }
+      } catch (error) {
+        console.error("Error getting past 5 days volume:", error);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      // console.log("results", results);
+    }
+    return results;
+  } catch (error) {
+    console.error("Error getting past 5 days volume:", error);
+    return null;
+  }
+}
+
 // startApp();
 
 // // --- Graceful Shutdown ---
@@ -436,4 +571,15 @@ async function getCandlesticksInMinute() {
 //   console.log("Exiting.");
 //   process.exit(0);
 // });
-export { startApp, listenToWebSocket, testBinanceClient, getExchangeInfo, listenBinanceCandles, getAccountInfo, getCandlesticksInMinute, getCandlesticksByAmount };
+export {
+  startApp,
+  listenToWebSocket,
+  testBinanceClient,
+  getExchangeInfo,
+  listenBinanceCandles,
+  getAccountInfo,
+  getCandlesticksInMinute,
+  getCandlesticksByAmount,
+  getPast5DaysVolume,
+  getCandlesticksByVolume,
+};

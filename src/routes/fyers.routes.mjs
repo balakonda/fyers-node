@@ -13,8 +13,19 @@ import {
   getVolumeHistoryFromFile,
   saveTradeDataToRedis,
 } from "../controllers/redis.controller.mjs";
-
-import { getExchangeInfo, testBinanceClient, startApp, listenBinanceCandles, getAccountInfo, getCandlesticksInMinute, getCandlesticksByAmount } from "../controllers/binance.controller.mjs";
+import { initFyersNew } from "../controllers/fyersnew.controller.mjs";
+import { simulateStockUpdates, stopStockUpdates } from "../controllers/publisher.mjs";
+import {
+  getExchangeInfo,
+  testBinanceClient,
+  startApp,
+  listenBinanceCandles,
+  getAccountInfo,
+  getCandlesticksInMinute,
+  getCandlesticksByAmount,
+  getPast5DaysVolume,
+  getCandlesticksByVolume,
+} from "../controllers/binance.controller.mjs";
 
 const router = express.Router();
 
@@ -24,6 +35,16 @@ router.post("/init", async (req, res) => {
   connectFyers(req, res);
   res.send({ status: 200, message: "Init successful" });
 });
+
+router.post("/newinit", async (req, res) => {
+  // await initRedisClient();
+  // connectFyers(req, res);
+  initFyersNew();
+  simulateStockUpdates(req, res);
+  res.send({ status: 200, message: "Init successful" });
+});
+
+router.get("/stop-dummy-stock-updates", stopStockUpdates);
 
 router.get("/disconnect", disconnectFyers);
 
@@ -175,6 +196,21 @@ router.get("/get-binance-candlesticks-by-amount", async (req, res) => {
   if (response) {
     res.send({ status: 200, message: "Binance candlesticks by amount", response });
   }
+});
+
+// get past 5 days volume
+router.get("/get-past-5-days-volume", async (req, res) => {
+  const response = await getPast5DaysVolume();
+  if (response) {
+    res.send({ status: 200, message: "Past 5 days volume", response });
+  }
+});
+
+// get-binance-candlesticks-by-volume?volume=1
+router.get("/get-binance-candlesticks-by-volume", async (req, res) => {
+  const { volume } = req.query;
+  const response = await getCandlesticksByVolume(volume);
+  res.send({ status: 200, message: "Binance candlesticks by volume", response });
 });
 
 // // POST /stop
